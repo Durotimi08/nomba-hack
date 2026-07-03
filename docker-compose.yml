@@ -1,0 +1,132 @@
+# ──────────────────────────────────────────────────────────────────────────
+# Kobo — local/dev orchestration.
+#
+#   docker compose up --build            -> postgres, redis, migrate, api, worker, web
+#   docker compose --profile tunnel up   -> also start the Cloudflare quick-tunnel
+#
+# Boot order is enforced via healthchecks + `depends_on` conditions:
+#   postgres/redis become healthy -> `migrate` runs to completion -> api/worker start.
+# ──────────────────────────────────────────────────────────────────────────
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: kobo
+      POSTGRES_PASSWORD: kobo
+      POSTGRES_DB: kobo
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kobo"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    # AOF persistence so BullMQ queue state survives restarts.
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-shot job: applies drizzle migrations, then exits. api/worker wait for it
+  # to finish successfully before booting.
+  migrate:
+    build:
+      context: .
+      dockerfile: packages/db/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://kobo:kobo@postgres:5432/kobo
+      # Operator login password for the seeded maker/checker accounts.
+      SEED_OPERATOR_PASSWORD: ${SEED_OPERATOR_PASSWORD:-kobo-demo-password}
+    # Migrate, then seed (idempotent) so operators + demo data always exist on boot.
+    command: ["sh", "-c", "pnpm --filter @kobo/db migrate && pnpm --filter @kobo/db seed"]
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: runtime
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    env_file:
+      - .env
+    environment:
+      # Override the dev value in .env — containers run in production mode.
+      NODE_ENV: production
+      DATABASE_URL: postgres://kobo:kobo@postgres:5432/kobo
+      REDIS_URL: redis://redis:6379
+      API_PORT: "3001"
+    ports:
+      - "3001:3001"
+    healthcheck:
+      test:
+        ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+      target: runtime
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    env_file:
+      - .env
+    environment:
+      # Override the dev value in .env — containers run in production mode.
+      NODE_ENV: production
+      DATABASE_URL: postgres://kobo:kobo@postgres:5432/kobo
+      REDIS_URL: redis://redis:6379
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      target: runtime
+    depends_on:
+      api:
+        condition: service_started
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:3001
+
+  # Opt-in: `docker compose --profile tunnel up tunnel`.
+  # Exposes the API over a public Cloudflare quick-tunnel URL (for Nomba webhooks).
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    command: ["tunnel", "--no-autoupdate", "--url", "http://api:3001"]
+    depends_on:
+      api:
+        condition: service_started
+    profiles:
+      - tunnel
+
+volumes:
+  pgdata:

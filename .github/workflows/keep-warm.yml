@@ -1,0 +1,44 @@
+name: Keep API warm
+
+# Render free web instances spin down after ~15 min idle, which pauses the
+# in-process worker (RUN_WORKER_IN_PROCESS). This pings /health so the instance
+# stays awake and keeps draining the reconcile/payout/backfill queues.
+#
+# Notes:
+#   • Scheduled workflows run only on the default branch, and GitHub may delay
+#     them under load — */10 usually holds the 15-min window; tighten to */5 if
+#     you see sleeps. Minimum allowed interval is 5 minutes.
+#   • Override the target by setting a repo variable API_URL
+#     (Settings → Secrets and variables → Actions → Variables). Falls back to the
+#     known production URL below.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: # allow manual "Run workflow" from the Actions tab
+
+concurrency:
+  group: keep-warm
+  cancel-in-progress: true
+
+jobs:
+  ping:
+    name: Ping /health
+    runs-on: ubuntu-latest
+    steps:
+      - name: curl /health
+        env:
+          API_URL: ${{ vars.API_URL || 'https://nomba-hack.onrender.com' }}
+        run: |
+          set -euo pipefail
+          # Generous timeouts + retries: the first hit after a spin-down is a
+          # cold start (~30-60s), which is exactly the case we want to wake.
+          code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            --connect-timeout 30 --max-time 120 \
+            --retry 5 --retry-delay 15 --retry-all-errors \
+            "${API_URL%/}/health")
+          echo "GET ${API_URL%/}/health -> HTTP $code"
+          if [ "$code" != "200" ]; then
+            echo "::error::API health check returned $code"
+            exit 1
+          fi

@@ -18,6 +18,15 @@ const EnvSchema = z.object({
   DATABASE_URL: z.string().url(),
   REDIS_URL: z.string().url(),
 
+  MIGRATE_ON_BOOT: z
+    .string()
+    .default("false")
+    .transform((s) => s === "true" || s === "1"),
+  SEED_ON_BOOT: z
+    .string()
+    .default("false")
+    .transform((s) => s === "true" || s === "1"),
+
   NOMBA_BASE_URL: z.string().url().default("https://sandbox.nomba.com"),
   NOMBA_CLIENT_ID: z.string().min(1),
   NOMBA_CLIENT_SECRET: z.string().min(1),

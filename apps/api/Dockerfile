@@ -56,6 +56,8 @@ COPY --from=prune --chown=app:app /app/node_modules ./node_modules
 COPY --from=prune --chown=app:app /app/package.json ./package.json
 COPY --from=build  --chown=app:app /repo/apps/api/dist ./apps/api/dist
 
+COPY --from=build  --chown=app:app /repo/packages/db/migrations ./node_modules/@kobo/db/migrations
+
 USER app
 EXPOSE 3001
 # Node fetch over 127.0.0.1 — BusyBox wget resolves localhost to IPv6 (::1) but

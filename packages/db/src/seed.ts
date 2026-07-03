@@ -8,6 +8,7 @@
  * needs no Nomba/Redis connection; the live demo creates real sandbox VAs via
  * the API. Amounts are kobo.
  */
+import { fileURLToPath } from "node:url";
 import argon2 from "argon2";
 import { eq } from "drizzle-orm";
 import { createDb } from "./client.js";
@@ -46,7 +47,12 @@ const DEMO_CUSTOMERS: SeedCustomer[] = [
   },
 ];
 
-async function seed(databaseUrl: string): Promise<void> {
+/**
+ * Apply migrations, then upsert the demo operators + multi-vertical data set.
+ * Idempotent and safe to call on every boot (see SEED_ON_BOOT). Exported so the
+ * API can self-seed on the free tier, where one-off jobs aren't available.
+ */
+export async function runSeed(databaseUrl: string): Promise<void> {
   await runMigrations(databaseUrl);
   const { db, close } = createDb(databaseUrl);
   try {
@@ -97,14 +103,18 @@ async function seed(databaseUrl: string): Promise<void> {
   }
 }
 
-const url = process.env.DATABASE_URL;
-if (!url) throw new Error("DATABASE_URL is required to seed");
-seed(url)
-  .then(() => {
-    console.log("Seed complete.");
-    process.exit(0);
-  })
-  .catch((err: unknown) => {
-    console.error(err);
-    process.exit(1);
-  });
+// Executed directly via `pnpm --filter @kobo/db seed`.
+const isMain = process.argv[1] === fileURLToPath(import.meta.url);
+if (isMain) {
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error("DATABASE_URL is required to seed");
+  runSeed(url)
+    .then(() => {
+      console.log("Seed complete.");
+      process.exit(0);
+    })
+    .catch((err: unknown) => {
+      console.error(err);
+      process.exit(1);
+    });
+}

@@ -64,11 +64,19 @@ export async function pollBackfill(deps: BackfillDeps): Promise<{ scanned: numbe
   let enqueued = 0;
 
   for (const va of vas) {
-    const txs = await nomba.listVirtualAccountTransactions({
-      virtualAccount: va.number,
-      dateFrom,
-      dateTo,
-    });
+    // A safety-net poll must never let one VA's upstream error abort the sweep
+    // (which also runs sweepUnprocessed). Log and move on.
+    let txs: NombaTransaction[];
+    try {
+      txs = await nomba.listVirtualAccountTransactions({
+        virtualAccount: va.number,
+        dateFrom,
+        dateTo,
+      });
+    } catch (err) {
+      log?.warn({ va: va.number, err: (err as Error).message }, "backfill: list transactions failed, skipping VA");
+      continue;
+    }
     for (const tx of txs) {
       if (!tx.sessionId || tx.amount <= 0n) continue;
       scanned++;

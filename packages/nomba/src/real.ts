@@ -133,10 +133,12 @@ export class RealNombaClient implements NombaClient {
       if (input.dateFrom) qs.set("dateFrom", input.dateFrom);
       if (input.dateTo) qs.set("dateTo", input.dateTo);
       if (cursor) qs.set("cursor", cursor);
+      // Tolerate 404: a VA with no Nomba-side transactions (or a not-yet-confirmed
+      // list endpoint) should read as "nothing to backfill", not crash the sweep.
       const data = await this.call<{ results: RawTransaction[]; cursor?: string }>(
         "GET",
         `/v1/transactions/virtual?${qs.toString()}`,
-        {},
+        { allow404: true },
       );
       for (const t of data?.results ?? []) out.push(mapTransaction(t));
       cursor = data?.cursor && data.cursor.length > 0 ? data.cursor : undefined;

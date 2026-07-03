@@ -72,7 +72,7 @@ services:
       # Allow the dashboard origin. The API matches origins literally, so this
       # must be the web service's exact URL (not "*") for browser calls to work.
       - key: CORS_ORIGINS
-        value: https://nomba-hack-web.onrender.com
+        value: https://nomba-web.onrender.com
       # Run the reconcile/payout/backfill consumers IN this process — the free-tier
       # alternative to a paid background worker. Keep the instance warm with an
       # external pinger (e.g. cron-job.org hitting /health every ~10 min) so it
@@ -85,7 +85,7 @@ services:
   # declared as an ARG in apps/web/Dockerfile and supplied here as an env var
   # (Render forwards matching env vars to the Docker build as build args).
   - type: web
-    name: nomba-hack-web
+    name: nomba-web
     runtime: docker
     region: oregon
     plan: free

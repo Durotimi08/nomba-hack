@@ -10,7 +10,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-const DEMO_PASSWORD = "kobo-demo-password";
+// Must match the value the operators were seeded with (SEED_OPERATOR_PASSWORD).
+const DEMO_PASSWORD = "kobo-demo-2026";
 
 export default function LoginPage() {
   const router = useRouter();

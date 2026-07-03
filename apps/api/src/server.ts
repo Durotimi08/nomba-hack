@@ -1,5 +1,6 @@
 /** API entrypoint: bootstrap the runtime, build the app, listen, handle shutdown. */
 import { runMigrations, runSeed } from "@kobo/db";
+import { startWorkers, type WorkerHandle } from "@kobo/worker";
 import { buildApp } from "./app.js";
 import { closeApiRuntime, createApiRuntime } from "./runtime.js";
 
@@ -21,8 +22,18 @@ async function main(): Promise<void> {
 
   await app.listen({ host: "0.0.0.0", port: rt.env.API_PORT });
 
+  // Zero-cost deploys: run the reconcile/payout/backfill consumers in this same
+  // process so a single free instance both serves HTTP and drains the queues.
+  // The API runtime already exposes db/redis/nomba, so startWorkers reuses them.
+  let workers: WorkerHandle | undefined;
+  if (rt.env.RUN_WORKER_IN_PROCESS) {
+    rt.log.info("RUN_WORKER_IN_PROCESS: starting in-process job consumers");
+    workers = await startWorkers(rt);
+  }
+
   const shutdown = async (): Promise<void> => {
     await app.close();
+    if (workers) await workers.close();
     await closeApiRuntime(rt);
     process.exit(0);
   };

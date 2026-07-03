@@ -59,6 +59,9 @@ importers:
       '@kobo/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@kobo/worker':
+        specifier: workspace:*
+        version: link:../worker
       argon2:
         specifier: ^0.41.1
         version: 0.41.1

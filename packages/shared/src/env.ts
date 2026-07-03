@@ -26,6 +26,14 @@ const EnvSchema = z.object({
     .string()
     .default("false")
     .transform((s) => s === "true" || s === "1"),
+  // Run the BullMQ consumers inside the API process instead of a separate worker.
+  // Lets a single free instance serve HTTP and process jobs (reconcile/payout/
+  // backfill) — the zero-cost alternative to a paid Render background worker.
+  // Prefer a dedicated worker in real production (isolation + independent scaling).
+  RUN_WORKER_IN_PROCESS: z
+    .string()
+    .default("false")
+    .transform((s) => s === "true" || s === "1"),
 
   NOMBA_BASE_URL: z.string().url().default("https://sandbox.nomba.com"),
   NOMBA_CLIENT_ID: z.string().min(1),

@@ -32,6 +32,11 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 # ── build ─────────────────────────────────────────────────────────────────
 FROM deps AS build
 ENV NEXT_TELEMETRY_DISABLED=1
+# NEXT_PUBLIC_* is inlined into the client bundle at build time, so the API URL
+# must be present *here*, not just at runtime. Render supplies this from a
+# matching service env var as a build arg. Defaults to localhost for local builds.
+ARG NEXT_PUBLIC_API_URL=http://localhost:3001
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 COPY . .
 RUN pnpm --filter @kobo/web build
 

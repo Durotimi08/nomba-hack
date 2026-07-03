@@ -13,6 +13,8 @@ out/
 .env
 .env.*
 !.env.example
+prod.env
+*.env
 
 # Internal planning/design notes (not part of the published repo)
 note/

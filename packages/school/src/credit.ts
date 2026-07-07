@@ -5,14 +5,14 @@
  * "apply credit" action. Pure ledger move — no cash. Postings carry no payment_id.
  */
 import { applyCredit } from "@kobo/core";
-import { invoices, ledgerEntries, type Db } from "@kobo/db";
+import { invoices, ledgerEntries, pendingRefunds, type Db } from "@kobo/db";
 import { LedgerAccount } from "@kobo/shared";
 import { and, eq, inArray, sql } from "drizzle-orm";
 
 export async function applyCustomerCredit(tx: Db, customerId: string): Promise<{ applied: bigint }> {
   const creditAccount = LedgerAccount.customerCredit(customerId);
 
-  // Available credit = credits − debits on the customer's credit account.
+  // Ledger credit balance = credits − debits on the customer's credit account.
   const [bal] = await tx
     .select({
       credit: sql<string>`COALESCE(SUM(CASE WHEN ${ledgerEntries.direction} = 'credit' THEN ${ledgerEntries.amount} ELSE 0 END), 0)`,
@@ -20,7 +20,22 @@ export async function applyCustomerCredit(tx: Db, customerId: string): Promise<{
     })
     .from(ledgerEntries)
     .where(eq(ledgerEntries.account, creditAccount));
-  const available = BigInt(bal?.credit ?? "0") - BigInt(bal?.debit ?? "0");
+  const ledgerBalance = BigInt(bal?.credit ?? "0") - BigInt(bal?.debit ?? "0");
+
+  // A refund's surplus lives in customer_credit until the payout posts its
+  // reversing debit. Reserve every refund that could still pay out
+  // (pending_approval/approved/failed — a failed one is re-approvable) so we never
+  // apply money that a later payout will draw down. Keeps credit ≥ owed refunds.
+  const [ref] = await tx
+    .select({ reserved: sql<string>`COALESCE(SUM(${pendingRefunds.amount}), 0)` })
+    .from(pendingRefunds)
+    .where(
+      and(
+        eq(pendingRefunds.customerId, customerId),
+        inArray(pendingRefunds.status, ["pending_approval", "approved", "failed"]),
+      ),
+    );
+  const available = ledgerBalance - BigInt(ref?.reserved ?? "0");
   if (available <= 0n) return { applied: 0n };
 
   const open = await tx

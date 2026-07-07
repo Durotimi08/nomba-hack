@@ -12,9 +12,10 @@
  */
 import { fileURLToPath } from "node:url";
 import { Queue, Worker, type ConnectionOptions } from "bullmq";
-import type { DbHandle } from "@kobo/db";
+import { pendingRefunds, type DbHandle } from "@kobo/db";
 import type { NombaClient } from "@kobo/nomba";
 import type { Env, Logger } from "@kobo/shared";
+import { eq } from "drizzle-orm";
 import type { Redis } from "ioredis";
 import { pollBackfill } from "./backfill.js";
 import { processApprovedRefund } from "./payout.js";
@@ -69,7 +70,22 @@ export async function startWorkers(deps: WorkerDeps): Promise<WorkerHandle> {
 
   const payoutWorker = new Worker<PayoutJob>(
     PAYOUT_QUEUE,
-    async (job) => processApprovedRefund({ db, nomba, merchantName: "Kobo", log }, job.data.refundId),
+    async (job) => {
+      try {
+        return await processApprovedRefund({ db, nomba, merchantName: "Kobo", log }, job.data.refundId);
+      } catch (err) {
+        // If this was the final attempt, don't leave the refund stuck `approved`.
+        const maxAttempts = job.opts.attempts ?? 1;
+        if (job.attemptsMade + 1 >= maxAttempts) {
+          await db
+            .update(pendingRefunds)
+            .set({ status: "failed", updatedAt: new Date() })
+            .where(eq(pendingRefunds.id, job.data.refundId));
+          log.warn({ refundId: job.data.refundId }, "refund payout retries exhausted — marked failed");
+        }
+        throw err;
+      }
+    },
     { connection, concurrency: 2 },
   );
 

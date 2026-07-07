@@ -359,7 +359,9 @@ export function buildApp(rt: ApiRuntime): FastifyInstance {
         .where(eq(pendingRefunds.id, req.params.id))
         .limit(1);
       if (!refund) return reply.code(404).send({ error: "refund not found" });
-      if (refund.status !== "pending_approval") {
+      // Allow re-approving a `failed` payout (e.g. after funding the wallet) — the
+      // merchant_tx_ref idempotency key means Nomba never double-pays on a retry.
+      if (refund.status !== "pending_approval" && refund.status !== "failed") {
         return reply.code(409).send({ error: `refund is ${refund.status}` });
       }
       if (refund.proposedBy && refund.proposedBy === req.user.email) {
@@ -369,7 +371,13 @@ export function buildApp(rt: ApiRuntime): FastifyInstance {
         .update(pendingRefunds)
         .set({ status: "approved", approvedBy: req.user.email, updatedAt: new Date() })
         .where(eq(pendingRefunds.id, req.params.id));
-      await payoutQueue.add("payout", { refundId: refund.id }, { jobId: `payout-${refund.id}` });
+      // Unique jobId per approval so a retry of a previously-failed refund actually
+      // enqueues (BullMQ dedups on jobId). Transient payout errors retry w/ backoff.
+      await payoutQueue.add(
+        "payout",
+        { refundId: refund.id },
+        { jobId: `payout-${refund.id}-${Date.now()}`, attempts: 5, backoff: { type: "exponential", delay: 5000 } },
+      );
       return { ok: true };
     },
   );

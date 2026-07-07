@@ -7,12 +7,11 @@
  * time, guarded by a Redis `SET NX` lease (cross-process) plus an in-process
  * mutex (same-process). Tokens are refreshed ~5 min before `expiresAt`.
  */
+import { createHash } from "node:crypto";
 import { Mutex } from "async-mutex";
 import type { Redis } from "ioredis";
 import { request } from "undici";
 
-const TOKEN_KEY = "kobo:nomba:token";
-const LOCK_KEY = "kobo:nomba:token:lock";
 const LOCK_TTL_MS = 10_000;
 const REFRESH_SKEW_MS = 5 * 60_000;
 
@@ -38,8 +37,20 @@ interface AuthResponse {
 
 export class NombaTokenManager {
   private readonly mutex = new Mutex();
+  // Namespace the cache by environment (base URL + client id). Switching sandbox
+  // ⇄ production, or rotating the client, therefore never reuses a stale token —
+  // e.g. a cached sandbox token is invalid at api.nomba.com and would 403.
+  private readonly tokenKey: string;
+  private readonly lockKey: string;
 
-  constructor(private readonly cfg: TokenManagerConfig) {}
+  constructor(private readonly cfg: TokenManagerConfig) {
+    const suffix = createHash("sha256")
+      .update(`${cfg.baseUrl}|${cfg.clientId}`)
+      .digest("hex")
+      .slice(0, 12);
+    this.tokenKey = `kobo:nomba:token:${suffix}`;
+    this.lockKey = `kobo:nomba:token:lock:${suffix}`;
+  }
 
   async getAccessToken(): Promise<string> {
     const cached = await this.read();
@@ -59,7 +70,7 @@ export class NombaTokenManager {
         await this.write(token);
         return token.access_token;
       } finally {
-        if (holdsLease) await this.cfg.redis.del(LOCK_KEY);
+        if (holdsLease) await this.cfg.redis.del(this.lockKey);
       }
     });
   }
@@ -69,16 +80,16 @@ export class NombaTokenManager {
   }
 
   private async read(): Promise<CachedToken | null> {
-    const raw = await this.cfg.redis.get(TOKEN_KEY);
+    const raw = await this.cfg.redis.get(this.tokenKey);
     return raw ? (JSON.parse(raw) as CachedToken) : null;
   }
 
   private async write(t: CachedToken): Promise<void> {
-    await this.cfg.redis.set(TOKEN_KEY, JSON.stringify(t));
+    await this.cfg.redis.set(this.tokenKey, JSON.stringify(t));
   }
 
   private async acquireLease(): Promise<boolean> {
-    const res = await this.cfg.redis.set(LOCK_KEY, "1", "PX", LOCK_TTL_MS, "NX");
+    const res = await this.cfg.redis.set(this.lockKey, "1", "PX", LOCK_TTL_MS, "NX");
     return res === "OK";
   }
 

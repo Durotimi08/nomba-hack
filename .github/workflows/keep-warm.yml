@@ -1,16 +1,15 @@
-name: Keep API warm
+name: Keep services warm
 
-# Render free web instances spin down after ~15 min idle, which pauses the
-# in-process worker (RUN_WORKER_IN_PROCESS). This pings /health so the instance
-# stays awake and keeps draining the reconcile/payout/backfill queues.
+# Render free web instances spin down after ~15 min idle. This pings BOTH the
+# API (keeping the in-process worker draining queues) and the web dashboard so
+# neither cold-starts for a visitor/judge.
 #
 # Notes:
 #   • Scheduled workflows run only on the default branch, and GitHub may delay
 #     them under load — */10 usually holds the 15-min window; tighten to */5 if
 #     you see sleeps. Minimum allowed interval is 5 minutes.
-#   • Override the target by setting a repo variable API_URL
-#     (Settings → Secrets and variables → Actions → Variables). Falls back to the
-#     known production URL below.
+#   • Override targets with repo variables API_URL / WEB_URL
+#     (Settings → Secrets and variables → Actions → Variables).
 
 on:
   schedule:
@@ -23,22 +22,31 @@ concurrency:
 
 jobs:
   ping:
-    name: Ping /health
+    name: Ping API + web
     runs-on: ubuntu-latest
+    env:
+      API_URL: ${{ vars.API_URL || 'https://nomba-hack.onrender.com' }}
+      WEB_URL: ${{ vars.WEB_URL || 'https://nomba-web.onrender.com' }}
     steps:
-      - name: curl /health
-        env:
-          API_URL: ${{ vars.API_URL || 'https://nomba-hack.onrender.com' }}
+      - name: Ping both services
         run: |
-          set -euo pipefail
+          set -uo pipefail
+          fail=0
           # Generous timeouts + retries: the first hit after a spin-down is a
           # cold start (~30-60s), which is exactly the case we want to wake.
-          code=$(curl -sS -o /dev/null -w '%{http_code}' \
-            --connect-timeout 30 --max-time 120 \
-            --retry 5 --retry-delay 15 --retry-all-errors \
-            "${API_URL%/}/health")
-          echo "GET ${API_URL%/}/health -> HTTP $code"
-          if [ "$code" != "200" ]; then
-            echo "::error::API health check returned $code"
-            exit 1
-          fi
+          ping() {
+            local url="$1"
+            local code
+            code=$(curl -sS -o /dev/null -w '%{http_code}' \
+              --connect-timeout 30 --max-time 120 \
+              --retry 5 --retry-delay 15 --retry-all-errors \
+              "$url" || echo "000")
+            echo "GET $url -> HTTP $code"
+            if [ "$code" != "200" ]; then
+              echo "::error::$url returned $code"
+              fail=1
+            fi
+          }
+          ping "${API_URL%/}/health"   # API + in-process worker
+          ping "${WEB_URL%/}/"         # Next.js dashboard
+          exit $fail

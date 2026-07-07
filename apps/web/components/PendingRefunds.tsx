@@ -45,22 +45,31 @@ export function PendingRefunds({
 }) {
   const { session } = useAuth();
   const [offset, setOffset] = useState(0);
+
+  const [status, setStatus] = useState<"pending_approval" | "failed">("pending_approval");
   const { data, isLoading, isError, error, refetch } = useRefunds(
-    "pending_approval",
+    status,
     limit ? undefined : { limit: PAGE_SIZE, offset },
   );
   const approve = useApproveRefund();
   const [pendingId, setPendingId] = useState<string | null>(null);
 
   const isMaker = session?.role === "maker";
+  const isFailed = status === "failed";
   const items = data?.items ?? [];
   const total = data?.total ?? 0;
   const rows = limit ? items.slice(0, limit) : items;
 
+  function switchStatus(next: "pending_approval" | "failed") {
+    setStatus(next);
+    setOffset(0);
+  }
+
   function onApprove(id: string) {
     setPendingId(id);
     approve.mutate(id, {
-      onSuccess: () => toast.success("Refund approved — payout enqueued"),
+      onSuccess: () =>
+        toast.success(isFailed ? "Retry enqueued — reprocessing payout" : "Refund approved — payout enqueued"),
       onError: (err) => {
         let message = "Failed to approve refund.";
         if (err instanceof ApiError) {
@@ -79,14 +88,35 @@ export function PendingRefunds({
     <Card>
       <CardHeader className="flex-row items-start justify-between">
         <div className="space-y-1">
-          <CardTitle>Pending refunds</CardTitle>
+          <CardTitle>{isFailed ? "Failed refunds" : "Pending refunds"}</CardTitle>
           <CardDescription>
-            Maker-checker controlled. A checker — not the proposer — approves
-            before payout.
+            {isFailed
+              ? "Payouts that were rejected (e.g. insufficient balance). Re-approve to retry."
+              : "Maker-checker controlled. A checker — not the proposer — approves before payout."}
           </CardDescription>
         </div>
         <CardAction className="flex items-center gap-2">
           {isMaker ? <Badge variant="warning">View-only as maker</Badge> : null}
+          {!limit ? (
+            <div className="flex items-center gap-0.5 rounded-md border border-border p-0.5">
+              <Button
+                variant={isFailed ? "ghost" : "secondary"}
+                size="sm"
+                className="h-7 px-2.5 text-xs"
+                onClick={() => switchStatus("pending_approval")}
+              >
+                Pending
+              </Button>
+              <Button
+                variant={isFailed ? "secondary" : "ghost"}
+                size="sm"
+                className="h-7 px-2.5 text-xs"
+                onClick={() => switchStatus("failed")}
+              >
+                Failed
+              </Button>
+            </div>
+          ) : null}
           {viewAllHref && total > (limit ?? 0) ? (
             <Button asChild variant="ghost" size="sm">
               <Link href={viewAllHref}>View all</Link>
@@ -106,8 +136,12 @@ export function PendingRefunds({
         />
       ) : rows.length === 0 ? (
         <EmptyState
-          title="No refunds awaiting approval"
-          hint="Proposed refunds appear here for checker sign-off."
+          title={isFailed ? "No failed refunds" : "No refunds awaiting approval"}
+          hint={
+            isFailed
+              ? "Payouts that fail (e.g. insufficient balance) show here to retry."
+              : "Proposed refunds appear here for checker sign-off."
+          }
         />
       ) : (
         <CardContent className="px-0 pb-2">
@@ -143,24 +177,25 @@ export function PendingRefunds({
                         <TooltipTrigger asChild>
                           <span tabIndex={0}>
                             <Button size="sm" disabled>
-                              Approve
+                              {isFailed ? "Retry" : "Approve"}
                             </Button>
                           </span>
                         </TooltipTrigger>
                         <TooltipContent>
-                          Sign in as a checker to approve refunds.
+                          Sign in as a checker to {isFailed ? "retry payouts" : "approve refunds"}.
                         </TooltipContent>
                       </Tooltip>
                     ) : (
                       <Button
                         size="sm"
+                        variant={isFailed ? "outline" : "default"}
                         onClick={() => onApprove(r.id)}
                         disabled={pendingId === r.id}
                       >
                         {pendingId === r.id ? (
                           <Loader2 className="size-3.5 animate-spin" />
                         ) : null}
-                        Approve
+                        {isFailed ? "Retry payout" : "Approve"}
                       </Button>
                     )}
                   </TableCell>

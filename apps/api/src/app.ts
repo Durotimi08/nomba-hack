@@ -37,7 +37,7 @@ import {
   getTimeseries,
   listCustomers,
   listOpenExceptions,
-  listPendingRefunds,
+  listRefunds,
 } from "./queries.js";
 import type { ApiRuntime } from "./runtime.js";
 import { registerSchoolRoutes } from "./school.js";
@@ -346,7 +346,14 @@ export function buildApp(rt: ApiRuntime): FastifyInstance {
   // ── School product (built on Kobo) ────────────────────────────────────────
   registerSchoolRoutes(app, { db, nomba, authenticate });
 
-  app.get("/refunds", { preHandler: authenticate }, (req) => listPendingRefunds(db, parsePage(req)));
+  // Filterable by ?status (default pending_approval). `failed` lets operators
+  // find and re-approve payouts that were rejected (e.g. insufficient balance).
+  const REFUND_STATUSES = new Set(["pending_approval", "approved", "sent", "failed"]);
+  app.get("/refunds", { preHandler: authenticate }, (req) => {
+    const q = (req.query as { status?: string }).status;
+    const status = q && REFUND_STATUSES.has(q) ? q : "pending_approval";
+    return listRefunds(db, parsePage(req), status);
+  });
 
   // Maker-checker: only a checker approves, and never a refund they proposed.
   app.post<{ Params: { id: string } }>(

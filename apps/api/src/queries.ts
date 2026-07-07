@@ -357,7 +357,11 @@ export interface RefundRow {
   createdAt: string;
 }
 
-export async function listPendingRefunds(db: Db, page: Page): Promise<Paginated<RefundRow>> {
+export async function listRefunds(
+  db: Db,
+  page: Page,
+  status: string,
+): Promise<Paginated<RefundRow>> {
   const { rows } = await db.execute<{
     id: string;
     customer_id: string;
@@ -369,11 +373,11 @@ export async function listPendingRefunds(db: Db, page: Page): Promise<Paginated<
   }>(sql`
     SELECT r.id, r.customer_id, c.name AS customer_name, r.amount::text, r.status, r.merchant_tx_ref, r.created_at
     FROM pending_refunds r JOIN customers c ON c.id = r.customer_id
-    WHERE r.status = 'pending_approval'
+    WHERE r.status = ${status}
     ORDER BY r.created_at ASC
     LIMIT ${page.limit} OFFSET ${page.offset}
   `);
-  const total = await countOf(db, sql`pending_refunds WHERE status = 'pending_approval'`);
+  const total = await countOf(db, sql`pending_refunds WHERE status = ${status}`);
   return {
     items: rows.map((r) => ({
       id: r.id,

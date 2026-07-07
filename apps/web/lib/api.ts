@@ -127,6 +127,12 @@ export const api = {
     });
   },
 
+  applyCredit(customerId: string): Promise<{ appliedKobo: string }> {
+    return request<{ appliedKobo: string }>(`/customers/${customerId}/apply-credit`, {
+      method: "POST",
+    });
+  },
+
   getKpis(): Promise<Kpis> {
     return request<Kpis>("/kpis");
   },

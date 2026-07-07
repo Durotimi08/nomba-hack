@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { use, useState } from "react";
-import { ArrowLeft, Plus } from "lucide-react";
+import { ArrowLeft, Loader2, Plus } from "lucide-react";
+import { toast } from "sonner";
 import {
   ClassificationBadge,
   InvoiceStatusBadge,
@@ -28,8 +29,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { ApiError } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { formatDate, formatDateTime, formatNaira } from "@/lib/format";
-import { useStatement } from "@/lib/hooks";
+import { useApplyCredit, useStatement } from "@/lib/hooks";
 
 export default function StatementPage({
   params,
@@ -37,8 +40,24 @@ export default function StatementPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
+  const { session } = useAuth();
   const { data, isLoading, isError, error, refetch } = useStatement(id);
   const [showNewInvoice, setShowNewInvoice] = useState(false);
+  const applyCredit = useApplyCredit(id);
+
+  function onApplyCredit() {
+    applyCredit.mutate(undefined, {
+      onSuccess: (res) => {
+        toast.success(
+          BigInt(res.appliedKobo) > 0n
+            ? `Applied ${formatNaira(res.appliedKobo)} of credit to open invoices`
+            : "No open invoices to apply credit to",
+        );
+      },
+      onError: (err) =>
+        toast.error(err instanceof ApiError ? err.message : "Failed to apply credit"),
+    });
+  }
 
   if (isLoading) {
     return (
@@ -137,6 +156,32 @@ export default function StatementPage({
             <p className="mt-1 text-xs text-muted-foreground">
               Overpayments held on account
             </p>
+            {BigInt(balances.creditKobo) > 0n ? (
+              session?.role === "checker" ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="mt-3"
+                  onClick={onApplyCredit}
+                  disabled={applyCredit.isPending}
+                >
+                  {applyCredit.isPending ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : null}
+                  Apply credit to invoices
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="mt-3"
+                  disabled
+                  title="Sign in as a checker to apply credit"
+                >
+                  Apply credit to invoices
+                </Button>
+              )
+            ) : null}
           </CardContent>
         </Card>
       </div>

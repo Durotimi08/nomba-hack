@@ -1,14 +1,15 @@
 /**
- * Apply a student's standing credit to their open invoices (the IO wrapper around
- * @kobo/core's pure `applyCredit`). Run at billing so a parent who paid early has
- * that money offset the new term automatically. The postings carry no payment_id.
+ * Apply a customer's standing credit to their open invoices (the IO wrapper around
+ * @kobo/core's pure `applyCredit`). A platform capability, not school-specific:
+ * used both by the school billing run (auto-offset a new term) and by the operator
+ * "apply credit" action. Pure ledger move — no cash. Postings carry no payment_id.
  */
 import { applyCredit } from "@kobo/core";
 import { invoices, ledgerEntries, type Db } from "@kobo/db";
 import { LedgerAccount } from "@kobo/shared";
 import { and, eq, inArray, sql } from "drizzle-orm";
 
-export async function applyStudentCredit(tx: Db, customerId: string): Promise<{ applied: bigint }> {
+export async function applyCustomerCredit(tx: Db, customerId: string): Promise<{ applied: bigint }> {
   const creditAccount = LedgerAccount.customerCredit(customerId);
 
   // Available credit = credits − debits on the customer's credit account.

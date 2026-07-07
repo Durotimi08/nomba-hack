@@ -21,6 +21,7 @@ import {
   WebhookEnvelopeSchema,
 } from "@kobo/shared";
 import { verifyWebhook } from "@kobo/nomba";
+import { applyCustomerCredit } from "@kobo/school";
 import { eq, sql } from "drizzle-orm";
 import Fastify, {
   type FastifyBaseLogger,
@@ -230,6 +231,24 @@ export function buildApp(rt: ApiRuntime): FastifyInstance {
       const statement = await getStatement(db, req.params.id);
       if (!statement) return reply.code(404).send({ error: "customer not found" });
       return statement;
+    },
+  );
+
+  // Apply a customer's standing credit (from prepayment/overpayment) to their
+  // open invoices, oldest-first. A checker action — but low-risk: it's a pure
+  // ledger offset (debit customer_credit, credit receivable), no cash moves.
+  app.post<{ Params: { id: string } }>(
+    "/customers/:id/apply-credit",
+    { preHandler: requireRole("checker") },
+    async (req, reply) => {
+      const [customer] = await db
+        .select({ id: customers.id })
+        .from(customers)
+        .where(eq(customers.id, req.params.id))
+        .limit(1);
+      if (!customer) return reply.code(404).send({ error: "customer not found" });
+      const { applied } = await db.transaction((tx) => applyCustomerCredit(tx, req.params.id));
+      return { appliedKobo: applied.toString() };
     },
   );
 

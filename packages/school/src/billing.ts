@@ -10,7 +10,7 @@
  */
 import { customers, invoices, ruleConsumptions, rules as rulesTable, type Db } from "@kobo/db";
 import { and, eq, isNull, or } from "drizzle-orm";
-import { applyStudentCredit } from "./credit.js";
+import { applyCustomerCredit } from "./credit.js";
 import { computeNetFee, type ChargeInput, type DiscountInput } from "./fee.js";
 import { matchesMetadata } from "./match.js";
 
@@ -116,7 +116,7 @@ export async function runBilling(db: Db, params: RunBillingParams): Promise<Bill
       totalExpected += fee.net;
 
       // Auto-apply any standing credit (e.g. an early payment) to the new invoice.
-      const credit = await applyStudentCredit(tx, student.id);
+      const credit = await applyCustomerCredit(tx, student.id);
       creditApplied += credit.applied;
     }
 

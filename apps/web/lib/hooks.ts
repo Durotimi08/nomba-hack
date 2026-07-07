@@ -50,6 +50,18 @@ export function useCreateCustomer() {
   });
 }
 
+export function useApplyCredit(customerId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.applyCredit(customerId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.statement(customerId) });
+      void qc.invalidateQueries({ queryKey: queryKeys.customers });
+      void qc.invalidateQueries({ queryKey: queryKeys.kpis });
+    },
+  });
+}
+
 export function useCreateInvoice(customerId: string) {
   const qc = useQueryClient();
   return useMutation({
